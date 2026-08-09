@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+*:focus-visible {
+  outline: 2px solid #E8A33D;
+  outline-offset: 2px;
+}
+
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  color: #EDEFF2;
+}
+
+.font-mono, .tabular {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-md bg-ink border border-line px-3 py-2 text-paper text-sm
+           placeholder:text-mute focus:border-ember transition-colors;
+  }
+  .btn-primary {
+    @apply rounded-md bg-ember text-ink font-semibold text-sm px-4 py-2.5
+           hover:brightness-110 transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply rounded-md border border-line text-paper font-medium text-sm px-4 py-2.5
+           hover:border-mute transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-stop {
+    @apply rounded-md bg-fall text-paper font-semibold text-sm px-4 py-2.5
+           hover:brightness-110 transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+}
