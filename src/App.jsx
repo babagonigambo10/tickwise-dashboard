@@ -213,7 +213,7 @@ function Dashboard({ session }) {
           {tab === 'control' && (
             <ControlPanel
               userId={userId} config={config} setConfig={setConfig}
-              hasCreds={hasCreds} sessionRow={sessionRow}
+              hasCreds={hasCreds} sessionRow={sessionRow} setSessionRow={setSessionRow}
             />
           )}
           {tab === 'credentials' && (
@@ -325,7 +325,7 @@ function Stat({ label, value, mono, small }) {
 // ---------------------------------------------------------------
 // Control panel — config form + start/stop
 // ---------------------------------------------------------------
-function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow }) {
+function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSessionRow }) {
   const [saving, setSaving] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
@@ -476,6 +476,19 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow }) {
     }
   }
 
+  // "New session" is a purely local reset -- it clears the visible form back
+  // to blank defaults and clears the displayed status/error card, but never
+  // touches Supabase. The old saved config and the old session's history stay
+  // exactly as they were. This exists because after a failed/old session, the
+  // dashboard (correctly) keeps showing that last real state until something
+  // new actually happens -- which reads as "stuck" when you want to configure
+  // a fresh pair from a clean slate instead of editing over the old one.
+  function startNewSession() {
+    setConfig({ ...DEFAULT_CONFIG })
+    setSessionRow(null)
+    setError('')
+  }
+
   async function forceStop() {
     setForcing(true)
     setError('')
@@ -555,6 +568,11 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow }) {
         >
           {starting ? 'Working…' : isRunning ? 'Stop bot' : isError ? 'Restart bot' : 'Start bot'}
         </button>
+        {!isRunning && (
+          <button onClick={startNewSession} className="btn-secondary">
+            New session
+          </button>
+        )}
         {!hasCreds && (
           <span className="text-sm text-ember font-mono">Add API credentials to enable trading</span>
         )}
