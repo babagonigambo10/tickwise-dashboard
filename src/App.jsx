@@ -329,6 +329,8 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
   const [saving, setSaving] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
+  const [killing, setKilling] = useState(false)
+  const [killResult, setKillResult] = useState(null)
   const isRunning = sessionRow?.status === 'running' || sessionRow?.status === 'starting'
   const isError = sessionRow?.status === 'error'
 
@@ -510,6 +512,40 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
     }
   }
 
+  // Talks directly to the exchange rather than trusting Supabase's picture
+  // of "what's running" -- this is the answer to "I don't trust that a
+  // resting order is really gone." It fetches every currently-open order
+  // on the exchange for the saved symbol and cancels each one, regardless
+  // of whether the bot ever knew that order existed. Confirmed with a
+  // native dialog first since this touches real orders on a live account
+  // and can't be undone.
+  async function killOrders() {
+    if (!window.confirm(
+      `This will cancel EVERY open order on ${config.exchange?.toUpperCase() || 'the exchange'} ` +
+      `for ${config.symbol || 'your saved pair'} right now, directly on the exchange -- ` +
+      `not just stop the bot watching it. This can't be undone. Continue?`
+    )) return
+
+    setKilling(true)
+    setError('')
+    setKillResult(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/kill-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.detail || 'Request failed')
+      setKillResult(body)
+      setStopRequestedAt(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setKilling(false)
+    }
+  }
+
   return (
     <div className="grid sm:grid-cols-2 gap-5">
       <Field label="Exchange">
@@ -573,10 +609,32 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
             New session
           </button>
         )}
+        {hasCreds && (
+          <button onClick={killOrders} disabled={killing} className="btn-stop">
+            {killing ? 'Cancelling on exchange…' : 'Cancel all orders on exchange'}
+          </button>
+        )}
         {!hasCreds && (
           <span className="text-sm text-ember font-mono">Add API credentials to enable trading</span>
         )}
       </div>
+
+      {killResult && (
+        <div className="sm:col-span-2 rounded-md border border-line bg-panel px-4 py-3 text-sm font-mono">
+          {killResult.cancelled.length === 0 && killResult.failed.length === 0 && (
+            <span className="text-mute">No open orders found on the exchange for {killResult.symbol} — nothing to cancel.</span>
+          )}
+          {killResult.cancelled.length > 0 && (
+            <div className="text-rise">Cancelled {killResult.cancelled.length} order(s) for {killResult.symbol} on the exchange.</div>
+          )}
+          {killResult.failed.length > 0 && (
+            <div className="text-fall mt-1">
+              {killResult.failed.length} order(s) could not be cancelled — check the exchange directly:
+              {killResult.failed.map(f => <div key={f.order_id} className="ml-2">• {f.order_id}: {f.error}</div>)}
+            </div>
+          )}
+        </div>
+      )}
 
       {showForceStop && (
         <div className="sm:col-span-2 rounded-md border border-fall/40 bg-fall/10 px-4 py-3 space-y-2">
