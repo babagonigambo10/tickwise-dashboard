@@ -12,6 +12,9 @@ const DEFAULT_CONFIG = {
   max_reprices_per_session: 50,
   min_competitor_value: '',
   max_competitor_value: '',
+  instant_buy_enabled: false,
+  instant_buy_min_price: '',
+  instant_buy_max_price: '',
 }
 
 // Curated list of ccxt exchange ids confirmed to support the WebSocket
@@ -290,6 +293,7 @@ function StatusBar({ sessionRow }) {
       </div>
       <Stat label="Current bid" value={sessionRow?.current_bid ? `$${sessionRow.current_bid}` : '—'} />
       <Stat label="Reprices" value={sessionRow?.reprice_count ?? 0} />
+      <Stat label="Instant buys" value={sessionRow?.instant_buy_count ?? 0} />
       <Stat label="Order ID" value={sessionRow?.current_order_id ?? '—'} mono small />
       {isReconnecting && (
         <div className="w-full rounded-md border border-ember/40 bg-ember/10 px-3 py-2 text-sm text-ember">
@@ -331,6 +335,7 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
   const [error, setError] = useState('')
   const [killing, setKilling] = useState(false)
   const [killResult, setKillResult] = useState(null)
+  const [instantBuySaving, setInstantBuySaving] = useState(false)
   const isRunning = sessionRow?.status === 'running' || sessionRow?.status === 'starting'
   const isError = sessionRow?.status === 'error'
 
@@ -397,6 +402,27 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
       return null
     }
 
+    // Same normalize-blanks-to-null treatment for the instant-buy range --
+    // this form field only ever edits the price band, never the toggle
+    // itself (that's saved instantly by toggleInstantBuy below), so it's
+    // safe to just carry whatever instant_buy_enabled already is.
+    const ibMinV = config.instant_buy_min_price === '' || config.instant_buy_min_price == null
+      ? null : Number(config.instant_buy_min_price)
+    const ibMaxV = config.instant_buy_max_price === '' || config.instant_buy_max_price == null
+      ? null : Number(config.instant_buy_max_price)
+    if (ibMinV !== null && ibMinV < 0) {
+      setError('Instant-buy min price cannot be negative.')
+      return null
+    }
+    if (ibMaxV !== null && ibMaxV < 0) {
+      setError('Instant-buy max price cannot be negative.')
+      return null
+    }
+    if (ibMinV !== null && ibMaxV !== null && ibMaxV < ibMinV) {
+      setError('Instant-buy max price cannot be lower than the min price.')
+      return null
+    }
+
     setSaving(true)
     // Drop any id carried over from a previously-loaded config. Letting
     // Postgres/ON CONFLICT decide the id is safer than reusing a stale one.
@@ -414,6 +440,8 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
           user_id: userId,
           min_competitor_value: minV,
           max_competitor_value: maxV,
+          instant_buy_min_price: ibMinV,
+          instant_buy_max_price: ibMaxV,
         },
         { onConflict: 'user_id' },
       )
@@ -546,6 +574,49 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
     }
   }
 
+  // Instant-buy is a fully independent, optional feature (see
+  // check_instant_buy in decision_engine.py / bot_task.py): while enabled,
+  // if a sell order is resting anywhere inside [min, max] the bot buys it
+  // immediately -- running alongside the normal passive order above, not
+  // instead of it. The toggle saves straight to Supabase the moment it's
+  // clicked, independent of "Save settings", so flipping it on/off takes
+  // effect within a few seconds even while the bot is already running --
+  // matching the whole point of this being a live on/off switch, not
+  // something that needs a restart. It reuses the same order quantity as
+  // the main config, not a separate one.
+  async function toggleInstantBuy() {
+    const newEnabled = !config.instant_buy_enabled
+    if (newEnabled) {
+      const minV = config.instant_buy_min_price === '' ? NaN : Number(config.instant_buy_min_price)
+      const maxV = config.instant_buy_max_price === '' ? NaN : Number(config.instant_buy_max_price)
+      if (Number.isNaN(minV) || Number.isNaN(maxV)) {
+        setError('Enter both an instant-buy min and max price before turning it on.')
+        return
+      }
+      if (maxV < minV) {
+        setError('Instant-buy max price cannot be lower than the min price.')
+        return
+      }
+    }
+    setInstantBuySaving(true)
+    setError('')
+    const { data, error } = await supabase
+      .from('bot_configs')
+      .update({
+        instant_buy_enabled: newEnabled,
+        instant_buy_min_price: config.instant_buy_min_price === '' ? null : Number(config.instant_buy_min_price),
+        instant_buy_max_price: config.instant_buy_max_price === '' ? null : Number(config.instant_buy_max_price),
+      })
+      .eq('user_id', userId)
+      .select().single()
+    setInstantBuySaving(false)
+    if (error) {
+      setError(error.message)
+      return
+    }
+    setConfig(data)
+  }
+
   return (
     <div className="grid sm:grid-cols-2 gap-5">
       <Field label="Exchange">
@@ -592,6 +663,34 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
         <input type="number" step="any" min="0" className="input" value={config.max_competitor_value ?? ''}
           onChange={e => update('max_competitor_value', e.target.value)} placeholder="unlimited" />
       </Field>
+
+      <div className="sm:col-span-2 pt-4 border-t border-line">
+        <div className="text-sm text-paper font-medium">Instant buy</div>
+        <p className="text-xs text-mute mt-0.5 mb-3">
+          Optional and separate from the order above. While on, if a sell order is resting anywhere
+          in this price range, the bot buys it immediately at the same order quantity — the passive
+          order above keeps running unaffected the whole time.
+        </p>
+      </div>
+      <Field label="Instant-buy min price">
+        <input type="number" step="any" className="input" value={config.instant_buy_min_price}
+          onChange={e => update('instant_buy_min_price', e.target.value)} placeholder="0.002000" />
+      </Field>
+      <Field label="Instant-buy max price">
+        <input type="number" step="any" className="input" value={config.instant_buy_max_price}
+          onChange={e => update('instant_buy_max_price', e.target.value)} placeholder="0.003000" />
+      </Field>
+      <div className="sm:col-span-2 -mt-2">
+        <button
+          onClick={toggleInstantBuy}
+          disabled={instantBuySaving}
+          className={config.instant_buy_enabled ? 'btn-stop' : 'btn-secondary'}
+        >
+          {instantBuySaving
+            ? 'Saving…'
+            : config.instant_buy_enabled ? 'Instant buy: ON — tap to turn off' : 'Instant buy: OFF — tap to turn on'}
+        </button>
+      </div>
 
       <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-2">
         <button onClick={saveConfig} disabled={saving} className="btn-secondary">
