@@ -99,7 +99,7 @@ function AuthScreen() {
             <input
               type="password" required value={password} onChange={e => setPassword(e.target.value)}
               className="input" placeholder="••••••••" minLength={6}
-            />
+          />
           </Field>
           {error && <p className="text-fall text-sm font-mono">{error}</p>}
           <button type="submit" disabled={busy} className="btn-primary w-full">
@@ -574,16 +574,18 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
     }
   }
 
-  // Instant-buy is a fully independent, optional feature (see
+  // Instant-buy is an optional feature that shares the SAME single order
+  // as the passive strategy below rather than placing a second one (see
   // check_instant_buy in decision_engine.py / bot_task.py): while enabled,
-  // if a sell order is resting anywhere inside [min, max] the bot buys it
-  // immediately -- running alongside the normal passive order above, not
-  // instead of it. The toggle saves straight to Supabase the moment it's
-  // clicked, independent of "Save settings", so flipping it on/off takes
-  // effect within a few seconds even while the bot is already running --
-  // matching the whole point of this being a live on/off switch, not
-  // something that needs a restart. It reuses the same order quantity as
-  // the main config, not a separate one.
+  // if a sell order appears anywhere inside [min, max] the bot cancels the
+  // resting order and immediately replaces it with one that buys at that
+  // price -- trading away queue position for an instant fill, using the
+  // same funds and order quantity rather than needing double the balance.
+  // The toggle saves straight to Supabase the moment it's clicked,
+  // independent of "Save settings", so flipping it on/off takes effect
+  // within a few seconds even while the bot is already running -- matching
+  // the whole point of this being a live on/off switch, not something that
+  // needs a restart.
   async function toggleInstantBuy() {
     const newEnabled = !config.instant_buy_enabled
     if (newEnabled) {
@@ -667,9 +669,10 @@ function ControlPanel({ userId, config, setConfig, hasCreds, sessionRow, setSess
       <div className="sm:col-span-2 pt-4 border-t border-line">
         <div className="text-sm text-paper font-medium">Instant buy</div>
         <p className="text-xs text-mute mt-0.5 mb-3">
-          Optional and separate from the order above. While on, if a sell order is resting anywhere
-          in this price range, the bot buys it immediately at the same order quantity — the passive
-          order above keeps running unaffected the whole time.
+          Optional, and shares the same order above rather than placing a second one. While on, if a
+          sell order appears anywhere in this price range, the bot cancels the resting order and
+          immediately places a new one to buy it — trading away the current queue position for an
+          instant fill at the same order quantity, using the same funds.
         </p>
       </div>
       <Field label="Instant-buy min price">
